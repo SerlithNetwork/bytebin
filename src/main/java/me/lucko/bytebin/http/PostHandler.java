@@ -51,15 +51,20 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 public final class PostHandler implements Route.Handler {
 
     /** Logger instance */
     private static final Logger LOGGER = LogManager.getLogger(PostHandler.class);
+
+    private static final Pattern IPV4_PATTERN = Pattern.compile("(?:\\d{1,3}\\.){3}\\d{1,3}");
+    private static final Pattern IPV6_PATTERN = Pattern.compile("([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}");
 
     public static final Summary CONTENT_SIZE_SUMMARY = Summary.build()
             .name("bytebin_content_size_bytes")
@@ -110,6 +115,15 @@ public final class PostHandler implements Route.Handler {
 
         // determine the content type
         String contentType = ctx.header("Content-Type").value("text/plain");
+
+        // censor ip addresses
+        if (contentType.startsWith("text/")) {
+            String contentString = new String(content, StandardCharsets.UTF_8);
+            contentString = IPV4_PATTERN.matcher(contentString).replaceAll("0.0.0.0");
+            contentString = IPV6_PATTERN.matcher(contentString).replaceAll("0:0:0:0:0:0:0:0");
+
+            content = contentString.getBytes(StandardCharsets.UTF_8);
+        }
 
         // generate a key
         String key = this.contentTokenGenerator.generate();
@@ -175,9 +189,10 @@ public final class PostHandler implements Route.Handler {
             encodings.add(ContentEncoding.GZIP);
         }
 
+        final byte[] contentFinal = content;
         String encoding = String.join(",", encodings);
         this.storageHandler.getExecutor().execute(() -> {
-            byte[] buf = content;
+            byte[] buf = contentFinal;
             if (compressServerSide) {
                 buf = Gzip.compress(buf);
             }
